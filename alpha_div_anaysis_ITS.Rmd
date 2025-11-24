@@ -1,0 +1,285 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+    knitr::opts_knit$set(root.dir = normalizePath("~/Library/CloudStorage/GoogleDrive-danielavargasrobles@gmail.com/My Drive/Filipa_Daniela_2021 -present/Proyectos/VAGINAL msystems/ITS")) 
+    
+```
+#LOAD
+```{r}
+# Cargar las librerías necesarias
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggprism)
+library(MASS)
+
+
+load("/Users/danielavargasrobles/Library/CloudStorage/GoogleDrive-danielavargasrobles@gmail.com/My\ Drive/Filipa_Daniela_2021\ -present/Proyectos/VAGINAL\ msystems/ITS/R/phy_objects/PHYraw_SH_ITS_alpha.RData")
+
+#phy<-PHYraw_2_ITS_alpha
+phy<-PHYraw_SH_ITS_alpha
+#phy<-PHYrawITS_alpha
+phy
+#extraer metadata
+met <- data.frame(sample_data(phy))
+
+#save metadata
+write.csv(met, "met/met_ITS_phy_86.csv")
+
+#phy<-phyloseq::tax_glom(phy, taxrank = "SH")
+
+
+#extract taxa table
+# taxa <- data.frame(tax_table(phy))
+# otu_table <- data.frame(otu_table(phy))
+# otu_table
+# #save OTU
+# write.csv(otu_table, "results/OTU_table.csv")
+# taxa
+# #extract metadata and save
+# write.csv(met, "results/metadata_phy.csv")
+```
+
+
+# Alpha SH
+se evaluaron todas estas variables"
+"Group"
+"CST1"
+"HPV_Status"
+"consensus.worked_no_ascus_chSCCtoHGSIL"
+"HPV_Types_highrisk"
+
+```{r}
+
+phy<-PHYraw_SH_ITS_alpha
+
+#subset
+#phy <- subset_samples(phy, Group=="Non_pregnant")
+
+# Definir paletas de colores
+paletas <- list(
+  Group = c("Non_pregnant" = "purple", "Pregnant" = "lightpink", "Menopause" = "lightblue4"),
+  CST1 = c("I" = "blue", "II" = "grey", "III" = "green3", "IV" = "purple", "V" = "yellow"),
+  HPV_Status = c("Positive" = "red", "Negative" = "blue"),
+    Lesion = c("Positive" = "red", "Negative" = "blue"),
+  consensus.worked_no_ascus_chSCCtoHGSIL = c("HGSIL" = "red", "NILM" = "blue", "LGSIL" = "orange"),
+  HPV_Types_highrisk = c("High_Risk" = "red", "Negative" = "blue", "Only_low_risk" = "orange")
+)
+
+
+# Definir el directorio de resultados
+output_dir <- file.path("results/alpha", format(Sys.Date(), "%Y-%m-%d/SH/all/"))
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Función para realizar los análisis de diversidad alfa ajustados por Age y BMI
+generar_analisis_alpha <- function(variable_interes) {
+  # Filtrar HPV_Types_highrisk y CST1 según lo indicado
+  phy_filtrado <- phy
+  if (variable_interes == "HPV_Types_highrisk") {
+    phy_filtrado <- subset_samples(phy_filtrado, HPV_Types_highrisk != "Only_low_risk")
+  } else if (variable_interes == "CST1") {
+    phy_filtrado <- subset_samples(phy_filtrado, CST1 != "V" & CST1 != "II")
+  }
+
+  # Filtrar muestras con valores no nulos en `shannon_ITS`
+  samples_con_shannon <- sample_names(phy_filtrado)[!is.na(sample_data(phy_filtrado)$shannon_ITS)]
+  phy_filtrado <- prune_samples(samples_con_shannon, phy_filtrado)
+
+  # Prune taxones sin presencia en el objeto phy filtrado
+  phy_filtrado <- prune_taxa(taxa_sums(phy_filtrado) > 0, phy_filtrado)
+
+  # Crear data frame `met` para trabajar con los datos
+  met <- data.frame(sample_data(phy_filtrado))
+
+  # Evaluar la normalidad de las métricas de diversidad alfa
+  normalidad_shannon <- shapiro.test(met$shannon_ITS)
+  normalidad_simpson <- shapiro.test(met$simpson_ITS)
+  normalidad_obs <- shapiro.test(met$obs_ITS)
+
+  # Guardar resultados de Shapiro-Wilk
+  capture.output(normalidad_shannon, file = file.path(output_dir, paste0("shapiro_shannon_", variable_interes, ".txt")))
+  capture.output(normalidad_simpson, file = file.path(output_dir, paste0("shapiro_simpson_", variable_interes, ".txt")))
+  capture.output(normalidad_obs, file = file.path(output_dir, paste0("shapiro_obs_", variable_interes, ".txt")))
+
+  # Modelos ajustados por Age y BMI
+  model_shannon <- lm(shannon_ITS ~ get(variable_interes) + Age + BMI, data = met)
+  model_simpson <- lm(simpson_ITS ~ get(variable_interes) + Age + BMI, data = met)
+  model_obs <- lm(obs_ITS ~ get(variable_interes) + Age + BMI, data = met)
+
+  # Guardar resultados de los modelos
+  capture.output(summary(model_shannon), file = file.path(output_dir, paste0("model_shannon_", variable_interes, ".txt")))
+  capture.output(summary(model_simpson), file = file.path(output_dir, paste0("model_simpson_", variable_interes, ".txt")))
+  capture.output(summary(model_obs), file = file.path(output_dir, paste0("model_obs_", variable_interes, ".txt")))
+
+  # Gráficos de diversidad alfa ajustados
+  met_long <- tidyr::gather(met, key = "measure", value = "value", shannon_ITS, simpson_ITS, obs_ITS)
+  p_alpha <- ggplot(met_long, aes_string(x = variable_interes, y = "value", fill = variable_interes)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(position = position_jitter(width = 0), size = 3, alpha = 0.6) +
+    facet_wrap(~measure, scales = "free_y") +
+    labs(title = variable_interes, x = variable_interes, y = "Alpha Diversity") +
+    scale_fill_manual(values = paletas[[variable_interes]]) +
+    theme_bw() +
+    theme(axis.text.x = element_text(size = 12),
+          axis.text.y = element_text(size = 12),
+          axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14),
+          plot.title = element_text(size = 16))
+
+  # Guardar gráfico
+  ggsave(file.path(output_dir, paste0("alpha_diversity_", variable_interes, ".pdf")), plot = p_alpha, width = 10, height = 5.5)
+}
+
+# Variables de interés para analizar
+variables_interes <- c("Group", "CST1", "HPV_Status", "Lesion","consensus.worked_no_ascus_chSCCtoHGSIL", "HPV_Types_highrisk")
+#variables_interes <- c( "CST1", "HPV_Status", "Lesion","consensus.worked_no_ascus_chSCCtoHGSIL", "HPV_Types_highrisk")
+
+# Ejecutar la función para cada variable de interés
+for (variable_interes in variables_interes) {
+  generar_analisis_alpha(variable_interes)
+}
+
+
+```
+
+
+#PAIRWISE-emmeans
+"estimated marginal means"
+```{r}
+phy <- subset_samples(phy, Group=="Non_pregnant")
+
+#kruskal
+kruskal.test(shannon_ITS~consensus.worked_no_ascus_chSCCtoHGSIL, data=met)
+#wilcoxpairwise fro consensus.worked_no_ascus_chSCCtoHGSIL variable and shannon_ITS
+pairwise.wilcox.test(met$shannon_ITS, met$consensus.worked_no_ascus_chSCCtoHGSIL, p.adjust.method = "BH")
+
+#Pairwise for consensus.worked_no_ascus_chSCCtoHGSIL from the linear model   model_shannon <- lm(shannon_ITS ~  consensus.worked_no_ascus_chSCCtoHGSIL + Age + BMI, data = met)
+
+#extrat metadata
+met <- data.frame(sample_data(phy))
+library(emmeans)
+model_shannon <- lm(shannon_ITS ~ consensus.worked_no_ascus_chSCCtoHGSIL + Age + BMI, data = met)
+
+# Calcular los estimados marginales ajustados para los niveles de la variable
+#aqui corremos el analisis de emmeans que significa "estimated marginal means"
+emms <- emmeans(model_shannon, ~ consensus.worked_no_ascus_chSCCtoHGSIL)
+
+# Comparaciones por pares con ajuste de p-valor (por default usa Tukey)
+pairwise_comparisons <- pairs(emms, adjust = "BH")  # o "tukey", "bonferroni", etc.
+
+# Mostrar resultados
+summary(pairwise_comparisons)
+```
+# Alpha rar
+I ran this only to verify that rarefaction showed similar results than non rar which was the method I choose to present due to the low number of sequences per sample we had.
+Resulst are similar to the non rar ones! significances are maintained
+```{r}
+phy<-PHYraw_SH_ITS_alpha
+
+## Realizar la rarefacción a 100 secuencias por muestra
+phyrar <- rarefy_even_depth(phy, sample.size = 100, rngseed = 123, replace = TRUE)
+
+# Calcular la diversidad (Shannon, Simpson, Observed)
+phyrar1 <- estimate_richness(phyrar, measures = c("Shannon", "Simpson", "Observed"))
+
+# Insertar los valores de diversidad en los metadatos
+sample_data(phyrar)$shannon_ITS_rar <- phyrar1$Shannon
+sample_data(phyrar)$simpson_ITS_rar <- phyrar1$Simpson
+sample_data(phyrar)$obs_ITS_rar <- phyrar1$Observed
+
+# Extraer metadata en un dataframe
+met <- data.frame(sample_data(phyrar))
+met$obs_ITS_rar
+met$shannon_ITS_rar
+met$simpson_ITS_rar
+phy<-phyrar
+#
+phy <- subset_samples(phyrar, Group=="Non_pregnant")
+
+# Definir paletas de colores
+paletas <- list(
+  Group = c("Non_pregnant" = "purple", "Pregnant" = "lightpink", "Menopause" = "lightblue4"),
+  CST1 = c("I" = "blue", "II" = "grey", "III" = "green3", "IV" = "purple", "V" = "yellow"),
+  HPV_Status = c("Positive" = "red", "Negative" = "blue"),
+  consensus.worked_no_ascus_chSCCtoHGSIL = c("HGSIL" = "red", "NILM" = "blue", "LGSIL" = "orange"),
+  HPV_Types_highrisk = c("High_Risk" = "red", "Negative" = "blue", "Only_low_risk" = "orange")
+)
+
+
+# Definir el directorio de resultados
+output_dir <- file.path("results/alpha", format(Sys.Date(), "%Y-%m-%d/SH_rar"))
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Función para realizar los análisis de diversidad alfa ajustados por Age y BMI
+generar_analisis_alpha <- function(variable_interes) {
+  # Filtrar HPV_Types_highrisk y CST1 según lo indicado
+  phy_filtrado <- phy
+  if (variable_interes == "HPV_Types_highrisk") {
+    phy_filtrado <- subset_samples(phy_filtrado, HPV_Types_highrisk != "Only_low_risk")
+  } else if (variable_interes == "CST1") {
+    phy_filtrado <- subset_samples(phy_filtrado, CST1 != "V" & CST1 != "II")
+  }
+
+  # Filtrar muestras con valores no nulos en `shannon_ITS_rar`
+  samples_con_shannon <- sample_names(phy_filtrado)[!is.na(sample_data(phy_filtrado)$shannon_ITS_rar)]
+  phy_filtrado <- prune_samples(samples_con_shannon, phy_filtrado)
+
+  # Prune taxones sin presencia en el objeto phy filtrado
+  phy_filtrado <- prune_taxa(taxa_sums(phy_filtrado) > 0, phy_filtrado)
+
+  # Crear data frame `met` para trabajar con los datos
+  met <- data.frame(sample_data(phy_filtrado))
+
+  # Evaluar la normalidad de las métricas de diversidad alfa
+  normalidad_shannon <- shapiro.test(met$shannon_ITS_rar)
+  normalidad_simpson <- shapiro.test(met$simpson_ITS_rar)
+  normalidad_obs <- shapiro.test(met$obs_ITS_rar)
+
+  # Guardar resultados de Shapiro-Wilk
+  capture.output(normalidad_shannon, file = file.path(output_dir, paste0("shapiro_shannon_", variable_interes, ".txt")))
+  capture.output(normalidad_simpson, file = file.path(output_dir, paste0("shapiro_simpson_", variable_interes, ".txt")))
+  capture.output(normalidad_obs, file = file.path(output_dir, paste0("shapiro_obs_", variable_interes, ".txt")))
+
+  # Modelos ajustados por Age y BMI
+  model_shannon <- lm(shannon_ITS_rar ~ get(variable_interes) + Age + BMI, data = met)
+  model_simpson <- lm(simpson_ITS_rar ~ get(variable_interes) + Age + BMI, data = met)
+  model_obs <- lm(obs_ITS_rar ~ get(variable_interes) + Age + BMI, data = met)
+
+  # Guardar resultados de los modelos
+  capture.output(summary(model_shannon), file = file.path(output_dir, paste0("model_shannon_", variable_interes, ".txt")))
+  capture.output(summary(model_simpson), file = file.path(output_dir, paste0("model_simpson_", variable_interes, ".txt")))
+  capture.output(summary(model_obs), file = file.path(output_dir, paste0("model_obs_", variable_interes, ".txt")))
+
+  # Gráficos de diversidad alfa ajustados
+  met_long <- tidyr::gather(met, key = "measure", value = "value", shannon_ITS_rar, simpson_ITS_rar, obs_ITS_rar)
+  p_alpha <- ggplot(met_long, aes(x = variable_interes, y = "value", fill = variable_interes)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(position = position_jitter(width = 0), size = 3, alpha = 0.6) +
+    facet_wrap(~measure, scales = "free_y") +
+    labs(title = variable_interes, x = variable_interes, y = "Alpha Diversity") +
+    scale_fill_manual(values = paletas[[variable_interes]]) +
+    theme_bw() +
+    theme(axis.text.x = element_text(size = 12),
+          axis.text.y = element_text(size = 12),
+          axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14),
+          plot.title = element_text(size = 16))
+
+  # Guardar gráfico
+  ggsave(file.path(output_dir, paste0("alpha_diversity_", variable_interes, ".pdf")), plot = p_alpha, width = 10, height = 5.5)
+}
+
+# Variables de interés para analizar
+#variables_interes <- c("Group")
+variables_interes <- c( "CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL", "HPV_Types_highrisk")
+
+# Ejecutar la función para cada variable de interés
+for (variable_interes in variables_interes) {
+  generar_analisis_alpha(variable_interes)
+}
+
+```

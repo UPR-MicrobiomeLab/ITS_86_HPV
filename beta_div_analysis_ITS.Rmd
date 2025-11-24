@@ -1,0 +1,575 @@
+---
+title: "Beta diversity ITS"
+output: html_notebook
+---
+
+```{r setup}
+     knitr::opts_knit$set(root.dir = normalizePath("~/Library/CloudStorage/GoogleDrive-danielavargasrobles@gmail.com/My Drive/Filipa_Daniela_2021 -present/Proyectos/VAGINAL msystems/ITS")) 
+```
+
+## Cargar librerías
+
+```{r}
+# Cargar las librerías necesarias
+library(phyloseq)
+library(vegan)
+library(tidyverse)
+library(reshape2)
+library(chemometrics)
+library(emmeans)
+library(usedist)
+library(stargazer)
+library(table1)
+library(tidyr)
+library(usedist)
+library(RColorBrewer)
+library(dplyr)
+library(compositions)
+library(ggprism)
+library(car)
+```
+
+# LOAD
+
+```{r}
+
+#load("/Users/danielavargasrobles/Library/CloudStorage/GoogleDrive-danielavargasrobles@gmail.com/My\ Drive/Filipa_Daniela_2021\ -present/Proyectos/VAGINAL\ msystems/ITS/R/phy_objects/PHYrawITS_alpha.RData")
+load("/Users/danielavargasrobles/Library/CloudStorage/GoogleDrive-danielavargasrobles@gmail.com/My\ Drive/Filipa_Daniela_2021\ -present/Proyectos/VAGINAL\ msystems/ITS/R/phy_objects/PHYraw_SH_ITS_alpha.RData")
+#ASV or genus level
+#phy<-PHYrawITS_alpha
+phy<-PHYraw_SH_ITS_alpha
+
+met=data.frame(sample_data(phy))
+
+ met %>%
+   dplyr::select(shannon_ITS,obs_ITS,SampleID, Lesion) %>%
+  arrange(shannon_ITS, obs_ITS)
+phy
+
+#taxa <- data.frame(tax_table(phy))
+
+#phy<-phyloseq::tax_glom(phy, taxrank = "SH")
+
+#normalizar phy object al 100%
+phy <- transform_sample_counts(phy, function(x) x / sum(x) * 100)
+
+
+phy_SH <- subset_taxa(phy, !is.na(tax_table(phy)[, "SH"]))
+phy_SH <- prune_samples(sample_sums(phy_SH) > 0, phy_SH)
+
+#subset only Non_pregnant
+#permutest_beta_disp$tab
+
+```
+#verificar qué muestras estoy perdiendo
+estas muestras se pierden porque tinen como clasificaion de SH dos ASV que no tienen classificacion a nivel de SH.
+```{r}
+
+# Obtener lista de muestras antes del filtrado
+samples_before <- sample_names(phy_SH)
+
+# Aplicar el filtrado
+phy_filtered <- prune_samples(sample_sums(phy_SH) > 0, phy_SH)
+
+# Obtener lista de muestras después del filtrado
+samples_after <- sample_names(phy_filtered)
+
+# Identificar las muestras eliminadas
+samples_removed <- setdiff(samples_before, samples_after)
+
+# Mostrar las muestras eliminadas
+print(samples_removed)
+
+# Guardar en un archivo si lo necesitas
+writeLines(samples_removed, "results/tables1/samples_removed.txt")
+
+```
+
+#PCoa
+Aquí solo guardamos los plots y en el siguiente bloque se hacen los analisis
+```{r}
+# Cargar paquetes necesarios
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(car) # Para leveneTest()
+
+paletas <- list(
+  Group = c("Non_pregnant" = "purple", "Pregnant" = "lightpink", "Menopause" = "lightblue4"),
+  CST1 = c("I" = "blue", "II" = "grey", "III" = "green3", "IV" = "purple", "V" = "yellow"),
+  HPV_Status = c("Positive" = "red", "Negative" = "blue"),
+    Lesion = c("Positive" = "red", "Negative" = "blue"),
+  consensus.worked_no_ascus_chSCCtoHGSIL = c("HGSIL" = "red", "NILM" = "blue", "LGSIL" = "orange"),
+  HPV_Types_highrisk = c("High_Risk" = "red", "Negative" = "blue", "Only_low_risk" = "orange")
+)
+
+
+phy <- phy_SH
+# phy <- subset_samples(phy, Group == "Non_pregnant")
+# sub="Non_Preg"
+# variables_interes <- c( "CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL",  "Lesion")
+
+#Descomentar para hacerlo con todas las mujeres
+ sub="all"
+
+variables_interes <- c("Group", "CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL", "Lesion")
+level="SH"
+#phy <- tax_glom(phy, taxrank = "Species")
+#phy <- tax_glom(phy, taxrank = "SH")
+phy <- subset_samples(phy, SampleID != "2031") # outlayer
+
+# level="genus"
+# phy <- tax_glom(phy, taxrank = "Genus")
+# phy <- subset_samples(phy, SampleID != "2031") # outlayer
+# phy <- subset_samples(phy, SampleID != "2232") # outlayer
+# phy <- subset_samples(phy, SampleID != "2204b") # outlayer
+# Cargar paquetes necesarios
+# Cargar paquetes necesarios
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(car) # Para leveneTest()
+
+ 
+# Obtener la fecha actual en formato YYYY-MM-DD
+today <- format(Sys.Date(), "%Y-%m-%d")
+
+# Definir el directorio de salida
+output_dir <- file.path("/results/beta/SH", today, sub)
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+
+
+# Definir métodos de distancia a usar
+set.seed(711)
+dist_methods <- c("bray", "jaccard")
+
+# Filtrar datos según la variable de interés antes del análisis
+for (dist_method in dist_methods) {
+  for (variable_interes in variables_interes) {
+
+    # Crear una copia del objeto phyloseq para aplicar los filtros
+    phy_filtrado <- phy
+
+    # Aplicar filtros específicos según la variable de interés
+    if (variable_interes == "CST1") {
+      phy_filtrado <- subset_samples(phy_filtrado, CST1 != "V" & CST1 != "II")
+    } else if (variable_interes == "HPV_Types_highrisk") {
+      phy_filtrado <- subset_samples(phy_filtrado, HPV_Types_highrisk != "Only_low_risk")
+    }
+
+    # Extraer metadatos y alinear muestras
+    met_filtrado <- data.frame(sample_data(phy_filtrado))
+    samples_comunes <- intersect(sample_names(phy_filtrado), rownames(met_filtrado))
+    phy_filtrado <- prune_samples(samples_comunes, phy_filtrado)
+    met_filtrado <- met_filtrado[samples_comunes, ]
+
+    # Verificar si la variable de interés tiene al menos dos niveles
+    niveles_variable <- unique(met_filtrado[[variable_interes]])
+    if (length(niveles_variable) < 2) {
+      warning(paste("La variable", variable_interes, "no tiene suficientes niveles para el análisis. Se omite."))
+      next
+    }
+
+    # Calcular la distancia utilizando el método seleccionado
+    dist <- phyloseq::distance(phy_filtrado, method = dist_method)
+
+    # Realizar PCoA en lugar de NMDS
+    pcoa_result <- ordinate(phy_filtrado, method = "PCoA", distance = dist)
+
+    # Extraer la varianza explicada
+    var_exp <- pcoa_result$values$Relative_eig * 100  # Convertir a porcentaje
+    var_pcoa1 <- round(var_exp[1], 2)
+    var_pcoa2 <- round(var_exp[2], 2)
+
+    # Extraer coordenadas del PCoA
+    pcoa_scores <- as.data.frame(pcoa_result$vectors[, 1:2])  # Solo los dos primeros ejes
+    colnames(pcoa_scores) <- c("PCoA1", "PCoA2")
+    pcoa_scores$sample_id <- rownames(pcoa_scores)
+
+    # Unir con metadatos
+    met_filtrado$sample_id <- rownames(met_filtrado)
+    pcoa_data <- merge(pcoa_scores, met_filtrado, by = "sample_id")
+
+    # Calcular centroides por grupo
+    centroids <- pcoa_data %>%
+      group_by_at(variable_interes) %>%
+      summarise(PCoA1 = mean(PCoA1), PCoA2 = mean(PCoA2))
+
+    # Crear y guardar gráfico PCoA con varianza explicada en los ejes
+    p_pcoa <- ggplot(pcoa_data, aes(x = "PCoA1", y = "PCoA2", color = variable_interes)) +
+      geom_point(size = 3, alpha = 0.8) +  # Puntos individuales
+      stat_ellipse(aes_string(fill = variable_interes), level = 0.95, alpha = 0, geom = "polygon") +  # Elipses 95% CI
+      geom_point(data = centroids, aes(x = PCoA1, y = PCoA2, color = !!sym(variable_interes)), 
+                 shape = 4, size = 5, stroke = 1.5) +  # Centroides (forma X)
+      theme_bw() +
+      theme(legend.position = "bottom") +  # Mover la leyenda abajo
+      scale_color_manual(values = paletas[[variable_interes]]) +
+      scale_fill_manual(values = paletas[[variable_interes]], guide = "none") +  # Ocultar leyenda de fill
+      labs(
+        title = paste("PCoA Ordination -", dist_method, "for", variable_interes),
+        x = paste0("PCoA1 (", var_pcoa1, "% variance)"),  # Agregar % de varianza explicada
+        y = paste0("PCoA2 (", var_pcoa2, "% variance)")   # Agregar % de varianza explicada
+      )
+
+    # Guardar PCoA en PDF
+    output_pcoa <- file.path(output_dir, paste0("PCoA_plot_", variable_interes, "_", dist_method, ".pdf"))
+    ggsave(output_pcoa, plot = p_pcoa, width = 5, height = 5)
+  }
+}
+
+
+```
+
+#Adonis y test de levene
+como no es significativo pero las varianzas se ven obviamente diferentes hacemos este test
+<No hace falta hace leve test y tampoco levene pair wise porque levene es un test univariado y betadisper es la version multivariada
+```{r}
+
+phy<-phy_SH
+
+ # phy <- subset_samples(phy, Group == "Non_pregnant")
+ # sub="Non_Preg"
+ # variables_interes <- c( "CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL",  "Lesion")
+
+#Descomentar para hacerlo con todas las mujeres
+sub="all"
+variables_interes <- c("Group", "CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL", "Lesion")
+
+#TAXA LEVEL
+#level="ASV"
+# level="sp"
+level="SH"
+# phy <- tax_glom(phy, taxrank = "Species")
+
+phy <- subset_samples(phy, !SampleID %in% c("2031", "2113b", "2168"))
+
+ # level="genus"
+# phy <- tax_glom(phy, taxrank = "Genus")
+# phy <- subset_samples(phy, SampleID != "2031") # outlayer
+# phy <- subset_samples(phy, SampleID != "2232") # outlayer
+# phy <- subset_samples(phy, SampleID != "2204b") # outlayer
+
+
+
+# Definir paletas de colores
+paletas <- list(
+  Group = c("Non_pregnant" = "purple", "Pregnant" = "lightpink", "Menopause" = "lightblue4"),
+  CST1 = c("I" = "blue", "II" = "grey", "III" = "green3", "IV" = "purple", "V" = "yellow"),
+  HPV_Status = c("Positive" = "red", "Negative" = "blue"),
+    Lesion = c("Positive" = "red", "Negative" = "blue"),
+  consensus.worked_no_ascus_chSCCtoHGSIL = c("HGSIL" = "red", "NILM" = "blue", "LGSIL" = "orange"),
+  HPV_Types_highrisk = c("High_Risk" = "red", "Negative" = "blue", "Only_low_risk" = "orange")
+)
+
+# Obtener la fecha actual en formato YYYY-MM-DD
+today <- format(Sys.Date(), "%Y-%m-%d")
+
+# Definir el directorio de salida
+output_dir <- file.path("results/beta/SH", today, sub,level)
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Filtrar las muestras con valores no nulos en `shannon_ITS`
+samples_con_shannon <- sample_names(phy)[!is.na(sample_data(phy)$shannon_ITS)]
+phy <- prune_samples(samples_con_shannon, phy)
+
+# Opcional: Prune taxones sin presencia en el objeto phy filtrado
+#phy <- prune_taxa(taxa_sums(phy) > 0, phy)
+
+
+
+# Definir métodos de distancia a usar
+set.seed(711)
+dist_methods <- c("bray", "jaccard")
+
+# Filtrar datos según la variable de interés antes del análisis
+for (dist_method in dist_methods) {
+  for (variable_interes in variables_interes) {
+    
+    # Crear una copia del objeto phyloseq para aplicar los filtros
+    phy_filtrado <- phy
+
+    # Aplicar filtros específicos según la variable de interés
+    if (variable_interes == "CST1") {
+      phy_filtrado <- subset_samples(phy_filtrado, CST1 != "V" & CST1 != "II")
+    } else if (variable_interes == "HPV_Types_highrisk") {
+      phy_filtrado <- subset_samples(phy_filtrado, HPV_Types_highrisk != "Only_low_risk")
+    }
+
+    # Filtrar muestras con valores no nulos en `shannon_ITS`
+    samples_con_shannon <- sample_names(phy_filtrado)[!is.na(sample_data(phy_filtrado)$shannon_ITS)]
+    phy_filtrado <- prune_samples(samples_con_shannon, phy_filtrado)
+
+    # Prune taxones sin presencia en el objeto phy filtrado
+   # phy_filtrado <- prune_taxa(taxa_sums(phy_filtrado) > 0, phy_filtrado)
+
+    # Alinear las muestras en `phy` y `met` para que contengan solo las muestras comunes
+    met <- data.frame(sample_data(phy_filtrado))
+    samples_comunes <- intersect(sample_names(phy_filtrado), rownames(met))
+    phy_filtrado <- prune_samples(samples_comunes, phy_filtrado)
+    met_filtrado <- met[samples_comunes, ]
+
+    # Filtrar muestras con NA en la variable de interés o en las covariables
+    met_filtrado <- met_filtrado[!is.na(met_filtrado[[variable_interes]]) &
+                                  !is.na(met_filtrado$Age) &
+                                  !is.na(met_filtrado$BMI), ]
+    samples_filtrados <- rownames(met_filtrado)
+    phy_filtrado <- prune_samples(samples_filtrados, phy_filtrado)
+
+    # Verificar si la variable de interés tiene al menos dos niveles
+    niveles_variable <- unique(met_filtrado[[variable_interes]])
+    if (length(niveles_variable) < 2) {
+      warning(paste("La variable", variable_interes, "no tiene suficientes niveles para el análisis. Se omite."))
+      next
+    }
+
+    # Calcular la distancia utilizando el método seleccionado
+    dist <- phyloseq::distance(phy_filtrado, method = dist_method)
+    dist_matrix <- as.matrix(dist)
+    dist_filtrada <- as.dist(dist_matrix[samples_filtrados, samples_filtrados])
+
+    # Realizar Adonis y guardar resultados
+    adonis_result <- adonis2(dist_filtrada ~ get(variable_interes) + Age + BMI, data = met_filtrado, by = "margin", permutations = 999)
+    output_adonis <- file.path(output_dir, paste0("adonis_", variable_interes, "_", dist_method, ".txt"))
+    write.table(adonis_result, file = output_adonis, sep = "\t", quote = FALSE, row.names = TRUE)
+
+    # Realizar análisis de Beta Dispersion
+    beta_disp <- betadisper(dist_filtrada, group = met_filtrado[[variable_interes]])
+
+    # Prueba de permutación para beta-dispersión con comparaciones por pares
+    permutest_beta_disp <- permutest(beta_disp, permutations = 999, pairwise = TRUE)
+
+    # Guardar resultados principales de Beta Dispersion
+    output_beta_disp <- file.path(output_dir, paste0("betadisper_", variable_interes, "_", dist_method, ".txt"))
+   write.csv(as.data.frame(permutest_beta_disp$tab), file = output_beta_disp, row.names = TRUE)
+
+
+    # Guardar resultados de comparaciones por pares si existen
+    if (!is.null(permutest_beta_disp$pairwise)) {
+      output_pairwise <- file.path(output_dir, paste0("Pairwise_beta_dispersion_", variable_interes, "_", dist_method, ".txt"))
+      capture.output({
+        cat("**Pairwise Comparisons for Beta Dispersion**\n")
+        print(permutest_beta_disp$pairwise)
+      }, file = output_pairwise)
+    }
+
+    # Crear y guardar boxplot de dispersión beta
+    boxplot_data <- data.frame(SampleID = names(beta_disp$distances),  # Agregar SampleID
+                           Distance_to_centroid = beta_disp$distances,
+                           Group = beta_disp$group)
+    p_boxplot <- ggplot(boxplot_data, aes(x = Group, y = Distance_to_centroid, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_text(aes(label = SampleID), position = position_jitter(width = 0.1, height = 0), size = 2) +
+  geom_point(position = position_jitter(width = 0.1, height = 0), size = 3, color = "black", alpha = 0.6) +
+  scale_fill_manual(values = paletas[[variable_interes]]) +
+  theme_bw() +
+  labs(title = paste("Beta Dispersion -", dist_method, "for", variable_interes),
+       x = variable_interes, y = "Distance to Centroid")
+    
+    output_boxplot <- file.path(output_dir, paste0("Boxplot_beta_dispersion_", variable_interes, "_", dist_method, ".pdf"))
+    ggsave(output_boxplot, plot = p_boxplot, width = 5, height = 5)
+
+    # Realizar test de Levene
+    distances <- beta_disp$distances
+    groups <- beta_disp$group
+    levene_result <- leveneTest(distances ~ groups, center = median)
+
+    # Guardar resultados del test de Levene
+    output_levene <- file.path(output_dir, paste0("levene_test_", variable_interes, "_", dist_method, ".txt"))
+    write.table(levene_result, file = output_levene, sep = "\t", quote = FALSE, row.names = TRUE)
+
+    # Realizar comparaciones por pares si es posible
+    if (length(unique(groups)) > 2) {
+      pairwise_levene <- pairwise.t.test(distances, groups, p.adjust.method = "BH")
+      output_pairwise_levene <- file.path(output_dir, paste0("Pairwise_levene_test_", variable_interes, "_", dist_method, ".txt"))
+      capture.output({
+        cat("**Pairwise Comparisons for Levene Test**\n")
+        print(pairwise_levene)
+      }, file = output_pairwise_levene)
+    }
+
+    # Realizar la ordenación NMDS
+    nmds <- metaMDS(dist_filtrada, trymax = 50)
+    nmds_scores <- as.data.frame(scores(nmds))
+    nmds_scores$sample_id <- rownames(nmds_scores)
+    met_filtrado$sample_id <- rownames(met_filtrado)
+    nmds_data <- merge(nmds_scores, met_filtrado, by = "sample_id")
+
+    # Calcular centroides para cada grupo
+    centroids <- nmds_data %>%
+      group_by_at(variable_interes) %>%
+      summarise(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
+
+    # Crear y guardar gráfico NMDS con centroides
+    p_nmds <- ggplot(nmds_data, aes_string(x = "NMDS1", y = "NMDS2", color = variable_interes)) +
+      geom_point(size = 3, alpha=0.8) +
+        geom_text(aes(label = SampleID),  size = 2) +
+
+      stat_ellipse(aes_string(color = variable_interes), level = 0.95) +
+      geom_point(data = centroids, aes(x = NMDS1, y = NMDS2, color = !!sym(variable_interes)),
+                 shape = 4, size = 5, stroke = 1.5) +
+      theme_bw() +
+      scale_color_manual(values = paletas[[variable_interes]]) +
+      labs(title = paste("NMDS Ordination -", dist_method, "for", variable_interes),
+           x = "NMDS1", y = "NMDS2")
+    output_nmds <- file.path(output_dir, paste0("NMDS_plot_", variable_interes, "_", dist_method, ".pdf"))
+    ggsave(output_nmds, plot = p_nmds, width = 8, height = 6)
+  }
+}
+
+```
+
+#Adonis improved
+ojo hay que quitar Age cuando se vaya a correr por group!!!!
+```{r}
+# Load required libraries
+library(phyloseq)
+library(dplyr)
+library(ggplot2)
+library(vegan)
+library(car)  # For Levene's test
+library(rstatix)  # For pairwise comparisons
+library(tidyr)
+library(readr)
+
+# Load dataset
+phy <- phy_SH
+
+# Uncomment if filtering only non-pregnant samples
+#phy <- subset_samples(phy, Group == "Non_pregnant")
+#sub <- "Non_Preg"
+#variables_interes <- c("CST1", "HPV_Status", "consensus.worked_no_ascus_chSCCtoHGSIL", "Lesion")
+
+# Define variables
+sub <- "all"
+variables_interes <- c("Group")
+level <- "SH"
+
+# Remove outlier samples
+#phy <- subset_samples(phy, !SampleID %in% c("2031", "2113b", "2168"))
+#phy <- subset_samples(phy, !SampleID %in% c("2168"))
+
+
+# Define color palettes
+paletas <- list(
+  Group = c("Non_pregnant" = "purple", "Pregnant" = "lightpink", "Menopause" = "lightblue4"),
+  CST1 = c("I" = "blue", "II" = "grey", "III" = "green3", "IV" = "purple", "V" = "yellow"),
+  HPV_Status = c("Positive" = "red", "Negative" = "blue"),
+  HPV_Types_highrisk = c("High_Risk" = "red", "Negative" = "blue", "Only_low_risk" = "orange"),
+  Lesion = c("Positive" = "red", "Negative" = "blue"),
+  consensus.worked_no_ascus_chSCCtoHGSIL = c("HGSIL" = "red", "NILM" = "blue", "LGSIL" = "orange")
+)
+
+# Create output directory
+today <- format(Sys.Date(), "%Y-%m-%d")
+output_dir <- file.path("results/beta/SH", today, sub, "SH")
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Remove samples without Shannon index
+samples_con_shannon <- sample_names(phy)[!is.na(sample_data(phy)$shannon_ITS)]
+phy <- prune_samples(samples_con_shannon, phy)
+
+# Define distance methods
+set.seed(711)
+dist_methods <- c("bray", "jaccard")
+
+# Loop through distance methods and variables
+for (dist_method in dist_methods) {
+  for (variable_interes in variables_interes) {
+    
+    # Filter phyloseq object
+    phy_filtrado <- phy
+    if (variable_interes == "CST1") {
+      phy_filtrado <- subset_samples(phy_filtrado, !CST1 %in% c("V", "II"))
+    } else if (variable_interes == "HPV_Types_highrisk") {
+      phy_filtrado <- subset_samples(phy_filtrado, HPV_Types_highrisk != "Only_low_risk")
+    }
+
+    # Remove taxa with zero abundance
+    phy_filtrado <- prune_taxa(taxa_sums(phy_filtrado) > 0, phy_filtrado)
+
+    # Align metadata and samples
+    met <- data.frame(sample_data(phy_filtrado))
+    samples_comunes <- intersect(sample_names(phy_filtrado), rownames(met))
+    phy_filtrado <- prune_samples(samples_comunes, phy_filtrado)
+    met_filtrado <- met[samples_comunes, ]
+
+    # Remove samples with missing values in key variables
+    met_filtrado <- met_filtrado[!is.na(met_filtrado[[variable_interes]]) & 
+                                 !is.na(met_filtrado$Age) & 
+                                 !is.na(met_filtrado$BMI), ]
+    samples_filtrados <- rownames(met_filtrado)
+    phy_filtrado <- prune_samples(samples_filtrados, phy_filtrado)
+
+    # Ensure variable has at least 2 levels
+    niveles_variable <- unique(met_filtrado[[variable_interes]])
+    if (length(niveles_variable) < 2) {
+      warning(paste("La variable", variable_interes, "no tiene suficientes niveles para el análisis. Se omite."))
+      next
+    }
+
+    # Calculate distance matrix
+    dist <- phyloseq::distance(phy_filtrado, method = dist_method)
+    dist_filtrada <- as.dist(as.matrix(dist)[samples_filtrados, samples_filtrados])
+
+    # PERMANOVA (Adonis)
+    adonis_result <- adonis2(dist_filtrada ~ get(variable_interes)  + BMI, 
+                             data = met_filtrado, by = "margin", permutations = 999)
+    write.table(adonis_result, file = file.path(output_dir, paste0("adonis_", variable_interes, "_", dist_method, ".txt")), 
+                sep = "\t", quote = FALSE, row.names = TRUE)
+
+    # Beta Dispersion Analysis
+    beta_disp <- betadisper(dist_filtrada, group = met_filtrado[[variable_interes]])
+    permutest_beta_disp <- permutest(beta_disp, permutations = 999, pairwise = TRUE)
+
+    # Save Beta Dispersion results
+    write.csv(as.data.frame(permutest_beta_disp$tab), 
+              file = file.path(output_dir, paste0("betadisper_", variable_interes, "_", dist_method, ".txt")), 
+              row.names = TRUE)
+
+    # Save Pairwise Beta Dispersion results if available
+    if (!is.null(permutest_beta_disp$pairwise)) {
+      write.csv(as.data.frame(permutest_beta_disp$pairwise), 
+                file = file.path(output_dir, paste0("Pairwise_beta_dispersion_", variable_interes, "_", dist_method, ".txt")), 
+                row.names = TRUE)
+    }
+
+    # Create and save boxplot for beta dispersion (distances to centroid)
+    boxplot_data <- data.frame(
+      SampleID = names(beta_disp$distances),
+      Distance_to_Centroid = beta_disp$distances,
+      Group = beta_disp$group
+    )
+
+    p_boxplot <- ggplot(boxplot_data, aes(x = Group, y = Distance_to_Centroid, fill = Group)) +
+      geom_boxplot(outlier.shape = NA, color = "black") +
+      geom_text(aes(label = SampleID), position = position_jitter(width = 0.1, height = 0), size = 2) +
+      geom_point(position = position_jitter(width = 0.1, height = 0), size = 3, color = "black", alpha = 0.6) +
+      scale_fill_manual(values = paletas[[variable_interes]]) +
+      theme_bw() +
+      labs(title = paste("Beta Dispersion -", dist_method, "for", variable_interes),
+           x = variable_interes, y = "Distance to Centroid")
+
+    ggsave(file.path(output_dir, paste0("Boxplot_beta_dispersion_", variable_interes, "_", dist_method, ".pdf")), 
+           plot = p_boxplot, width = 5, height = 5)
+
+    # NMDS Ordination
+    nmds <- metaMDS(dist_filtrada, trymax = 50)
+    nmds_scores <- as.data.frame(scores(nmds))
+    nmds_scores$sample_id <- rownames(nmds_scores)
+    nmds_data <- merge(nmds_scores, met_filtrado, by.x = "sample_id", by.y = "row.names")
+
+    p_nmds <- ggplot(nmds_data, aes(x = NMDS1, y = NMDS2, color = get(variable_interes))) +
+      geom_point(size = 3, alpha = 0.8) +
+      geom_text(aes(label = SampleID), size = 2) +
+      stat_ellipse(level = 0.95) +
+      theme_bw() +
+      scale_color_manual(values = paletas[[variable_interes]]) +
+      labs(title = paste("NMDS -", dist_method, "for", variable_interes),
+           x = "NMDS1", y = "NMDS2")
+
+    ggsave(file.path(output_dir, paste0("NMDS_plot_", variable_interes, "_", dist_method, ".pdf")), 
+           plot = p_nmds, width = 8, height = 6)
+  }
+}
+```
+
