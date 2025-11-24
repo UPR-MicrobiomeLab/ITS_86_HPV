@@ -1,7 +1,7 @@
 # README
 
 This dataset includes:
-- A curated **sample file** (metadata)
+- A curated **sample file** (metadata) (`met_ITS_phy_86_2_w_prep_id.csv`)
 - The pipeline to process all ITS raw sequences (`Seqs ITS processing QIIME2.pdf`)
 - A processed **phyloseq object** derived from ITS data  (`PHYraw_SH_ITS_alpha.RData`)
 - R scripts to reproduce the full analysis pipeline  
