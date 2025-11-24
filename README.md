@@ -1,17 +1,10 @@
 # README
 
 This dataset includes:
-- A curated **sample file** (metadata) 
-- A processed **phyloseq object** derived from ITS data  
+- A curated **sample file** (metadata)
+- The pipeline to process all ITS raw sequences (`Seqs ITS processing QIIME2.pdf`)
+- A processed **phyloseq object** derived from ITS data  (`PHYraw_SH_ITS_alpha.RData`)
 - R scripts to reproduce the full analysis pipeline  
-
----
-
-## Phyloseq Object
-
-The processed phyloseq object is included:
-
-**File:** `PHYraw_SH_ITS_alpha.RData`  
 
 ---
 
