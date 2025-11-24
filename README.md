@@ -22,7 +22,7 @@ These scripts contain all commands and workflow used to generate:
 - Final exported tables and figures  
 
 **Available files:**
-- `1_generate_phyloseq_obj_ITS.R`
+- `generate_phyloseq_obj_ITS.R`
 - `alpha_diversity_script.R`
 - `beta_diversity_script.R`
 
